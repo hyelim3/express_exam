@@ -4,9 +4,11 @@ import express from "express";
 import mysql from "mysql2/promise";
 import path from "path";
 import cors from "cors";
+import axios from "axios";
 const __dirname = path.resolve();
 
 const app = express();
+
 app.use(express.json()); //할일수정
 app.use(cors());
 
@@ -22,17 +24,45 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+app.getData = async () => {
+  const data = await axios.get("http://localhost:3000/todos");
+  console.log("async await", data);
+};
+
 app.get("/todos", async (req, res) => {
   const [rows] = await pool.query("SELECT * FROM todo ORDER BY id DESC");
   res.json(rows);
 });
 
-app.patch("/todos/:id", async (req, res) => {
-  const { id } = req.params;
-  const { perform_date, content } = req.body;
-  console.log("id", id); //받아오는거 확인
-  console.log("perform_date", perform_date);
-  console.log("content", content);
+//추가
+app.post("/todos", async (req, res) => {
+  const {
+    body: { text },
+  } = req;
+
+  console.log(text);
+
+  await pool.query(
+    `
+    INSERT INTO todo
+    SET reg_date = NOW(),
+    perform_date = '2022-05-18 07:00:00',
+    checked = 0,
+    text = ?
+    `,
+    [text]
+  );
+
+  //updatedTodos db추가
+  const [updatedTodos] = await pool.query(
+    `
+    SELECT *
+    FROM todo
+    ORDER BY id
+    DESC
+    `
+  );
+  res.json(updatedTodos);
 });
 
 //todos 조회
@@ -40,7 +70,7 @@ app.get("/todos/:id", async (req, res) => {
   //const id = req.params.id;
   const { id } = req.params;
 
-  const [rows] = await pool.query(
+  const [todo] = await pool.query(
     `
   SELECT *
   FROM todo
@@ -49,34 +79,34 @@ app.get("/todos/:id", async (req, res) => {
     [id]
   );
 
-  if (rows.length === 0) {
+  if (!todo) {
     res.status(404).json({
       msg: "not found",
     });
     return;
   }
 
-  res.json(rows[0]);
+  res.json(todo);
 });
 
 //todos 수정
 app.patch("/todos/:id", async (req, res) => {
   const { id } = req.params;
-  const { perform_date, content } = req.body;
+  const { perform_date, text } = req.body;
 
   const [rows] = await pool.query(
     `
     select *
     from todo
-    where id =>
-    `[id]
+    where id = ?
+    `,
+    [id]
   );
 
-  if (res.length === 0) {
+  if (rows.length === 0) {
     res.status(404).json({
       msg: "not found",
     });
-    return;
   }
 
   if (!perform_date) {
@@ -86,9 +116,9 @@ app.patch("/todos/:id", async (req, res) => {
     return;
   }
 
-  if (!content) {
+  if (!text) {
     res.status(400).json({
-      msg: "content required",
+      msg: "text required",
     });
     return;
   }
@@ -96,15 +126,20 @@ app.patch("/todos/:id", async (req, res) => {
     `
     UPDATE todo
     SET perform_date = ?,
-    content = ?
+    text = ?
     WHERE id = ?
     `,
-    [perform_date, content, id]
+    [perform_date, text, id]
+  );
+  const [updatedTodos] = await pool.query(
+    `
+    SELECT *
+    FROM todo
+    ORDER BY id DESC
+    `
   );
 
-  res.json({
-    msg: `${id}번 할일이 수정되었습니다.`,
-  });
+  res.json(updatedTodos);
 });
 
 //express, node.js db 수정
@@ -119,6 +154,7 @@ app.patch("/todos/check/:id", async (req, res) => {
     [id]
   );
   console.log(todoRow);
+
   if (!todoRow) {
     res.status(404).json({
       msg: "not found",
@@ -127,6 +163,7 @@ app.patch("/todos/check/:id", async (req, res) => {
   }
 
   await pool.query(
+    //진짜 업데이트 해줘야함 , 포스트맨
     `
     UPDATE todo
     SET checked = ?
@@ -140,12 +177,12 @@ app.patch("/todos/check/:id", async (req, res) => {
   SELECT *
   FROM todo
   ORDER BY id DESC
-  `,
-    [id]
+  `
   );
 
   res.json(updatedTodos);
 });
+
 ///todos/check/:id 삭제
 app.delete("/todos/check/:id", async (req, res) => {
   const { id } = req.params;
@@ -170,7 +207,7 @@ app.delete("/todos/check/:id", async (req, res) => {
      WHERE id =?`,
     [id]
   );
-
+  //반환update해줘서 onRemove에 삭제해도 가능한다
   const [updatedTodos] = await pool.query(
     `
   SELECT *
